@@ -1,0 +1,59 @@
+```html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="CONSULTOR MEDICO: asistente virtual para resolver dudas sobre trámites y temas médicos.">
+    <title>CONSULTOR MEDICO | Asistente virtual</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="config.js"></script>
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <main class="aplicacion">
+        <header class="encabezado">
+            <div class="icono-medico" aria-hidden="true">+</div>
+            <div class="informacion-agente">
+                <h1>CONSULTOR MEDICO</h1>
+                <p><span class="indicador"></span> Asistente virtual</p>
+            </div>
+        </header>
+
+        <section class="zona-chat" id="zona-chat" aria-label="zona chat">
+            <div class="bienvenida">
+                <div class="icono-bienvenida" aria-hidden="true">+</div>
+                <h2>¿En qué puedo ayudarte?</h2>
+                <p>Estoy acá para responder tus consultas sobre trámites y temas médicos.</p>
+            </div>
+
+            <div class="mensajes" id="mensajes"
+                 role="log" aria-live="polite" aria-label="Conversación">
+            </div>
+        </section>
+
+        <section class="zona-escritura" aria-label="zona escritura">
+            <form id="formulario-chat">
+                <label for="mensaje" class="etiqueta-oculta">Escribí tu consulta</label>
+                <textarea
+                    id="mensaje"
+                    name="mensaje"
+                    placeholder="Escribí tu consulta acá..."
+                    rows="1"
+                    maxlength="2000"
+                    required
+                ></textarea>
+                <button type="submit" id="boton-enviar" aria-label="Enviar mensaje">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M22 2 15 22l-4-9-9-4Z"></path>
+                        <path d="M22 2 11 13"></path>
+                    </svg>
+                </button>
+            </form>
+            <p class="aviso">La información es orientativa y no reemplaza la consulta con un profesional de la salud.</p>
+            <p id="estado" class="estado" role="status" aria-live="polite"></p>
+        </section>
+    </main>
+</body>
+</html>
+```
