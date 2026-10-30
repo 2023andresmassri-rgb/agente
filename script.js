@@ -1,4 +1,4 @@
-```javascript
+
 // Elementos principales de la interfaz
 const formulario = document.getElementById("formulario-chat");
 const campoMensaje = document.getElementById("mensaje");
