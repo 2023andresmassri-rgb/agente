@@ -1,4 +1,3 @@
-
 // Elementos principales de la interfaz
 const formulario = document.getElementById("formulario-chat");
 const campoMensaje = document.getElementById("mensaje");
@@ -11,11 +10,41 @@ const estado = document.getElementById("estado");
 // Configuración de seguridad y tiempos
 const TIEMPO_LIMITE = 30000;
 const ESPERA_ENTRE_ENVIOS = 1500;
+const LIMITE_CARACTERES = 500;
 
+// Control de envíos
 let enviando = false;
 let ultimoEnvio = 0;
 
-// Agrega mensajes al chat sin interpretar HTML del usuario
+// Identificador de sesión
+let sessionId = "";
+
+function generarSessionId() {
+    try {
+        const guardado = localStorage.getItem("sessionId");
+
+        if (guardado) {
+            return guardado;
+        }
+
+        const nuevo = crypto.randomUUID
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random()}`;
+
+        localStorage.setItem("sessionId", nuevo);
+
+        return nuevo;
+
+    } catch {
+        // Si localStorage falla, usa un identificador en memoria.
+        return `${Date.now()}-${Math.random()}`;
+    }
+}
+
+// Se genera una sola vez al iniciar la aplicación.
+sessionId = generarSessionId();
+
+// Agrega mensajes al chat sin interpretar HTML
 function agregarMensaje(texto, tipo) {
     const burbuja = document.createElement("div");
 
@@ -55,35 +84,143 @@ campoMensaje.addEventListener("keydown", (evento) => {
     }
 });
 
-// Extrae la respuesta de los formatos habituales del webhook
-function obtenerRespuesta(datos) {
-    if (typeof datos === "string" && datos.trim()) {
-        return datos.trim();
-    }
+// Comprueba si la URL está configurada
+function webhookConfigurado() {
+    return (
+        typeof WEBHOOK_URL === "string" &&
+        WEBHOOK_URL.trim() !== "" &&
+        !WEBHOOK_URL.includes("ACA VA") &&
+        !WEBHOOK_URL.includes("ejemplo-webhook-prueba")
+    );
+}
 
-    if (datos && typeof datos === "object") {
-        const posiblesCampos = [
-            "respuesta",
-            "response",
-            "mensaje",
-            "message",
-            "output",
-            "text"
-        ];
+// Limpia los bloques Markdown
+function limpiarMarkdown(texto) {
+    return texto
+        .trim()
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/, "")
+        .trim();
+}
 
-        for (const campo of posiblesCampos) {
-            if (typeof datos[campo] === "string" && datos[campo].trim()) {
-                return datos[campo].trim();
-            }
+// Escapa saltos de línea reales dentro de valores JSON
+function escaparSaltosDeLinea(texto) {
+    let resultado = "";
+    let dentroDeTexto = false;
+    let escape = false;
+
+    for (const caracter of texto) {
+        if (escape) {
+            resultado += caracter;
+            escape = false;
+            continue;
+        }
+
+        if (caracter === "\\" && dentroDeTexto) {
+            resultado += caracter;
+            escape = true;
+            continue;
+        }
+
+        if (caracter === '"') {
+            dentroDeTexto = !dentroDeTexto;
+        }
+
+        if (dentroDeTexto && caracter === "\n") {
+            resultado += "\\n";
+        } else if (dentroDeTexto && caracter === "\r") {
+            resultado += "\\r";
+        } else {
+            resultado += caracter;
         }
     }
 
-    throw new Error("El servidor no devolvió una respuesta válida.");
+    return resultado;
 }
 
-// Envía la consulta al webhook y procesa el resultado
+// Extrae una respuesta aunque el JSON esté mal formado
+function extraerRespuestaRegex(texto) {
+    const campos = ["response", "respuesta", "message", "mensaje"];
+
+    for (const campo of campos) {
+        const expresion = new RegExp(
+            `"${campo}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`,
+            "i"
+        );
+
+        const coincidencia = texto.match(expresion);
+
+        if (coincidencia && coincidencia[1].trim()) {
+            return coincidencia[1]
+                .replace(/\\n/g, "\n")
+                .replace(/\\r/g, "\r")
+                .replace(/\\"/g, '"')
+                .replace(/\\\\/g, "\\")
+                .trim();
+        }
+    }
+
+    return "";
+}
+
+// Obtiene el texto de respuesta de Make
+function obtenerRespuesta(texto) {
+    if (!texto) {
+        return "(respuesta vacía)";
+    }
+
+    let datos;
+
+    try {
+        datos = JSON.parse(texto);
+    } catch {
+        // Intenta reparar saltos de línea sin escapar.
+        if (texto.startsWith("{") && texto.endsWith("}")) {
+            try {
+                datos = JSON.parse(escaparSaltosDeLinea(texto));
+            } catch {
+                const extraida = extraerRespuestaRegex(texto);
+
+                return extraida || texto;
+            }
+        } else {
+            return texto;
+        }
+    }
+
+    // Si Make devuelve un objeto, busca los campos conocidos.
+    if (
+        datos !== null &&
+        typeof datos === "object" &&
+        !Array.isArray(datos)
+    ) {
+        const campos = [
+            "response",
+            "respuesta",
+            "message",
+            "mensaje"
+        ];
+
+        for (const campo of campos) {
+            if (
+                typeof datos[campo] === "string" &&
+                datos[campo].trim()
+            ) {
+                return datos[campo].trim();
+            }
+        }
+
+        return "Make respondió, pero sin el campo response";
+    }
+
+    // Los valores que no son objetos se muestran como llegaron.
+    return texto;
+}
+
+// Envía la consulta al webhook
 async function enviarConsulta(texto) {
     const controlador = new AbortController();
+
     const temporizador = setTimeout(
         () => controlador.abort(),
         TIEMPO_LIMITE
@@ -100,90 +237,143 @@ async function enviarConsulta(texto) {
     botonEnviar.disabled = true;
     campoMensaje.disabled = true;
 
-    mostrarEstado("Procesando tu consulta...");
+    mostrarEstado("Procesando tu consulta...", "cargando");
 
     try {
-        if (
-            !WEBHOOK_URL ||
-            WEBHOOK_URL.includes("ejemplo-webhook-prueba")
-        ) {
+        // Comprueba la URL antes de enviar.
+        if (!webhookConfigurado()) {
             throw new Error(
-                "Configurá una URL de webhook válida en config.js."
+                "Falta pegar la URL de tu webhook en config.js"
             );
         }
 
+        // Envía únicamente los tres campos requeridos.
         const respuesta = await fetch(WEBHOOK_URL, {
             method: "POST",
+
             headers: {
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/plain"
+                "Content-Type": "application/json"
             },
+
             body: JSON.stringify({
-                mensaje: texto
+                sessionId: sessionId,
+                mensaje: texto,
+                fecha: new Date().toISOString()
             }),
+
             signal: controlador.signal
         });
 
+        // Comprueba errores del servidor.
         if (!respuesta.ok) {
             throw new Error(
-                `El servidor respondió con el código ${respuesta.status}.`
+                `Make respondió con error (código ${respuesta.status}). Revisá que tu escenario esté en Active o que hayas apretado Run once.`
             );
         }
 
-        const contenido = await respuesta.text();
-        let datos;
+        // Lee la respuesta como texto.
+        const contenido = (await respuesta.text()).trim();
 
-        try {
-            datos = JSON.parse(contenido);
-        } catch {
-            datos = contenido;
-        }
+        const textoLimpio = limpiarMarkdown(contenido);
 
-        const textoRespuesta = obtenerRespuesta(datos);
+        const textoRespuesta = obtenerRespuesta(textoLimpio);
 
+        // Muestra la respuesta.
         burbujaCarga.textContent = textoRespuesta;
         burbujaCarga.classList.remove("cargando");
 
-        mostrarEstado("Respuesta recibida correctamente.", "exito");
+        mostrarEstado(
+            "Respuesta recibida correctamente.",
+            "exito"
+        );
+
     } catch (error) {
+
         burbujaCarga.remove();
 
         if (error.name === "AbortError") {
+
             agregarMensaje(
                 "La consulta tardó demasiado. Intentá nuevamente.",
                 "agente"
             );
-            mostrarEstado("Tiempo de espera agotado.", "error");
-        } else {
+
+            mostrarEstado(
+                "Tiempo de espera agotado (30 segundos).",
+                "error"
+            );
+
+        } else if (
+            error.message.includes("Falta pegar la URL")
+        ) {
+
+            agregarMensaje(error.message, "agente");
+
+            mostrarEstado(error.message, "error");
+
+        } else if (
+            error.message.includes("Make respondió con error")
+        ) {
+
+            agregarMensaje(error.message, "agente");
+
+            mostrarEstado(error.message, "error");
+
+        } else if (error instanceof TypeError) {
+
             agregarMensaje(
-                "No pudimos obtener una respuesta. Revisá la conexión o intentá más tarde.",
+                "No se pudo conectar con Make. Revisá tu conexión.",
                 "agente"
             );
 
-            mostrarEstado(error.message, "error");
-            console.error("Error al consultar el webhook:", error);
+            mostrarEstado(
+                "Error de red. No se pudo conectar.",
+                "error"
+            );
+
+        } else {
+
+            agregarMensaje(
+                "Ocurrió un error al procesar la respuesta.",
+                "agente"
+            );
+
+            mostrarEstado(
+                "Error al procesar la respuesta.",
+                "error"
+            );
+
+            console.error("Error al consultar Make:", error);
         }
+
     } finally {
+
         clearTimeout(temporizador);
 
-        // Evita envíos repetidos y mantiene una pausa entre consultas.
+        // Mantiene una pausa mínima entre envíos.
         const tiempoTranscurrido = Date.now() - ultimoEnvio;
+
         const esperaRestante = Math.max(
             0,
             ESPERA_ENTRE_ENVIOS - tiempoTranscurrido
         );
 
         setTimeout(() => {
+
             enviando = false;
+
             botonEnviar.disabled = false;
             campoMensaje.disabled = false;
+
             campoMensaje.focus();
+
         }, esperaRestante);
     }
 }
 
 // Controla el envío del formulario
 formulario.addEventListener("submit", async (evento) => {
+
     evento.preventDefault();
 
     if (enviando) {
@@ -193,7 +383,23 @@ formulario.addEventListener("submit", async (evento) => {
     const texto = campoMensaje.value.trim();
 
     if (!texto) {
-        mostrarEstado("Escribí una consulta antes de enviar.", "error");
+        mostrarEstado(
+            "Escribí una consulta antes de enviar.",
+            "error"
+        );
+
+        campoMensaje.focus();
+        return;
+    }
+
+    // Comprueba el límite de caracteres.
+    if (texto.length > LIMITE_CARACTERES) {
+
+        mostrarEstado(
+            "El mensaje no puede superar los 500 caracteres.",
+            "error"
+        );
+
         campoMensaje.focus();
         return;
     }
