@@ -6,7 +6,8 @@
     <meta name="description" content="CONSULTOR MEDICO: asistente virtual para resolver dudas sobre trámites y temas médicos.">
     <title>CONSULTOR MEDICO | Asistente virtual</title>
     <link rel="stylesheet" href="style.css">
-
+    <script src="config.js"></script>
+    <script src="script.js" defer></script>
 </head>
 <body>
     <main class="aplicacion">
@@ -18,20 +19,18 @@
             </div>
         </header>
 
-        <section class="zona-chat" id="zona-chat" aria-label="zona chat">
-            <div class="bienvenida">
+        <section class="zona-chat" id="zona-chat" aria-label="Zona de chat">
+            <div class="bienvenida" id="bienvenida">
                 <div class="icono-bienvenida" aria-hidden="true">+</div>
                 <h2>¿En qué puedo ayudarte?</h2>
                 <p>Estoy acá para responder tus consultas sobre trámites y temas médicos.</p>
             </div>
 
-            <div class="mensajes" id="mensajes"
-                 role="log" aria-live="polite" aria-label="Conversación">
-            </div>
+            <div class="mensajes" id="mensajes" role="log" aria-live="polite" aria-label="Conversación"></div>
         </section>
 
-        <section class="zona-escritura" aria-label="zona escritura">
-            <form id="formulario-chat">
+        <section class="zona-escritura" aria-label="Zona de escritura">
+            <form id="formulario-chat" novalidate>
                 <label for="mensaje" class="etiqueta-oculta">Escribí tu consulta</label>
                 <textarea
                     id="mensaje"
@@ -39,7 +38,6 @@
                     placeholder="Escribí tu consulta acá..."
                     rows="1"
                     maxlength="500"
-                    required
                 ></textarea>
                 <button type="submit" id="boton-enviar" aria-label="Enviar mensaje">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -52,8 +50,5 @@
             <p id="estado" class="estado" role="status" aria-live="polite"></p>
         </section>
     </main>
-
-    <script src="config.js"></script>
-    <script src="script.js" defer></script>
 </body>
 </html>
