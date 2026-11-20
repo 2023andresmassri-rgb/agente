@@ -188,3 +188,247 @@ function obtenerRespuesta(texto) {
         datos !== null &&
         typeof datos === "object" &&
         !Array.isArray(datos)
+    ) {
+        const campos = [
+            "response",
+            "respuesta",
+            "message",
+            "mensaje"
+        ];
+
+        for (const campo of campos) {
+            if (
+                typeof datos[campo] === "string" &&
+                datos[campo].trim()
+            ) {
+                return datos[campo].trim();
+            }
+        }
+
+        return "Make respondió, pero sin el campo response";
+    }
+
+    // Los valores que no son objetos se muestran como llegaron.
+    return texto;
+}
+
+// Envía la consulta al webhook
+async function enviarConsulta(texto) {
+    const controlador = new AbortController();
+
+    const temporizador = setTimeout(
+        () => controlador.abort(),
+        TIEMPO_LIMITE
+    );
+
+    const burbujaCarga = agregarMensaje(
+        "Estoy preparando la respuesta...",
+        "agente"
+    );
+
+    burbujaCarga.classList.add("cargando");
+
+    enviando = true;
+    botonEnviar.disabled = true;
+    campoMensaje.disabled = true;
+
+    mostrarEstado("Procesando tu consulta...", "cargando");
+
+    try {
+        // Comprueba la URL antes de enviar.
+        if (!webhookConfigurado()) {
+            throw new Error(
+                "Falta pegar la URL de tu webhook en config.js"
+            );
+        }
+
+        // Envía únicamente los tres campos requeridos.
+        const respuesta = await fetch(WEBHOOK_URL, {
+            method: "POST",
+
+            headers: {
+                "Content-Type": "application/json"
+            },
+
+            body: JSON.stringify({
+                sessionId: sessionId,
+                mensaje: texto,
+                fecha: new Date().toISOString()
+            }),
+
+            signal: controlador.signal
+        });
+
+        // Comprueba errores del servidor.
+        if (!respuesta.ok) {
+            throw new Error(
+                `Make respondió con error (código ${respuesta.status}). Revisá que tu escenario esté en Active o que hayas apretado Run once.`
+            );
+        }
+
+        // Lee la respuesta como texto.
+        const contenido = (await respuesta.text()).trim();
+
+        const textoLimpio = limpiarMarkdown(contenido);
+
+        const textoRespuesta = obtenerRespuesta(textoLimpio);
+
+        // Muestra la respuesta.
+        burbujaCarga.textContent = textoRespuesta;
+        burbujaCarga.classList.remove("cargando");
+        zonaChat.scrollTop = zonaChat.scrollHeight;
+
+        mostrarEstado(
+            "Respuesta recibida correctamente.",
+            "exito"
+        );
+
+    } catch (error) {
+
+        burbujaCarga.remove();
+
+        if (error.name === "AbortError") {
+
+            agregarMensaje(
+                "La consulta tardó demasiado. Intentá nuevamente.",
+                "agente"
+            );
+
+            mostrarEstado(
+                "Tiempo de espera agotado (30 segundos).",
+                "error"
+            );
+
+        } else if (
+            error.message && error.message.includes("Falta pegar la URL")
+        ) {
+
+            agregarMensaje(error.message, "agente");
+
+            mostrarEstado(error.message, "error");
+
+        } else if (
+            error.message && error.message.includes("Make respondió con error")
+        ) {
+
+            agregarMensaje(error.message, "agente");
+
+            mostrarEstado(error.message, "error");
+
+        } else if (error instanceof TypeError) {
+
+            agregarMensaje(
+                "No se pudo conectar con Make. Revisá tu conexión.",
+                "agente"
+            );
+
+            mostrarEstado(
+                "Error de red. No se pudo conectar.",
+                "error"
+            );
+
+        } else {
+
+            agregarMensaje(
+                "Ocurrió un error al procesar la respuesta.",
+                "agente"
+            );
+
+            mostrarEstado(
+                "Error al procesar la respuesta.",
+                "error"
+            );
+
+            console.error("Error al consultar Make:", error);
+        }
+
+    } finally {
+
+        clearTimeout(temporizador);
+
+        // Mantiene una pausa mínima entre envíos.
+        const tiempoTranscurrido = Date.now() - ultimoEnvio;
+
+        const esperaRestante = Math.max(
+            0,
+            ESPERA_ENTRE_ENVIOS - tiempoTranscurrido
+        );
+
+        setTimeout(() => {
+
+            enviando = false;
+
+            botonEnviar.disabled = false;
+            campoMensaje.disabled = false;
+
+            campoMensaje.focus();
+
+        }, esperaRestante);
+    }
+}
+
+// Función centralizada para procesar el envío
+async function procesarEnvio() {
+    if (enviando) {
+        return;
+    }
+
+    const texto = campoMensaje.value.trim();
+
+    if (!texto) {
+        mostrarEstado(
+            "Escribí una consulta antes de enviar.",
+            "error"
+        );
+
+        campoMensaje.focus();
+        return;
+    }
+
+    // Comprueba el límite de caracteres.
+    if (texto.length > LIMITE_CARACTERES) {
+
+        mostrarEstado(
+            "El mensaje no puede superar los 500 caracteres.",
+            "error"
+        );
+
+        campoMensaje.focus();
+        return;
+    }
+
+    // Oculta la bienvenida cuando comienza la conversación.
+    if (bienvenida) {
+        bienvenida.hidden = true;
+    }
+
+    agregarMensaje(texto, "usuario");
+
+    campoMensaje.value = "";
+    ajustarCampo();
+
+    ultimoEnvio = Date.now();
+
+    await enviarConsulta(texto);
+}
+
+// Eventos de la interfaz (verificando que existan los elementos)
+if (campoMensaje && formulario) {
+    campoMensaje.addEventListener("input", ajustarCampo);
+
+    // Permite enviar con Enter y escribir nuevas líneas con Shift + Enter
+    campoMensaje.addEventListener("keydown", (evento) => {
+        if (evento.key === "Enter" && !evento.shiftKey) {
+            evento.preventDefault();
+            procesarEnvio();
+        }
+    });
+
+    // Controla el envío del formulario al hacer clic en el botón
+    formulario.addEventListener("submit", (evento) => {
+        evento.preventDefault();
+        procesarEnvio();
+    });
+} else {
+    console.error("Error crítico: No se encontró el formulario o el campo de mensaje en el HTML.");
+}
